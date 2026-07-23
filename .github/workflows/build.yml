@@ -1,11 +1,20 @@
-name: Ultimate Uncut Dual-Architecture Cheat Engine Build
-on: [workflow_dispatch]
+name: Ultimate Uncut Multi-Version Cheat Engine Build
+on:
+  workflow_dispatch:
+    inputs:
+      ce_version:
+        description: '輸入你想編譯的官方 Tag 版本 (例如: master, 7.5, 7.4)'
+        required: true
+        default: 'master'
+
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
+    # 【完美升級】利用 inputs 變數，讓你能隔空指定任意官方 Tag 代碼節點
     - uses: actions/checkout@v4
       with: 
+        ref: ${{ github.event.inputs.ce_version }}
         submodules: recursive
         
     - name: Set up Lazarus (Fixed version)
@@ -30,7 +39,7 @@ jobs:
         $pFiles = Get-ChildItem -Recurse -Filter "*.lpr" | Where-Object {$_.FullName -match "luaclient|speedhack|vehdebug"}
         foreach ($file in $pFiles) { lazbuild -B --cpu=x86_64 --os=win64 $file.FullName }
 
-        # 3. 全量補全 C++ 核心組件 (包含 .NET Collector, DirectXHook, 框架與 TCC 核心)
+        # 3. 全量補全 C++ 核心組件 (包含 DirectXHook, Plugin框架, MemoryCollector, TCC核心)
         Get-ChildItem -Recurse -Filter *.sln | Where-Object { $_.FullName -match "DotNetDataCollector|DirectXHook|plugin|MemoryCollector|tcc" } | ForEach-Object {
             if ($_.Name -match "tcc") {
                 msbuild $_.FullName /p:Configuration="Output to 64 (Release)" /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
@@ -41,7 +50,7 @@ jobs:
             }
         }
         
-        # 4. 【語法 Bug 修正】縮回同一行，以極致安全的邏輯將所有編譯好的 DLL/EXE 歸位至 bin
+        # 4. 安全歸位：精準將所有編譯出來的 DLL/EXE 搬回 bin
         Write-Host "正在進行安全的二進位組件定點集結..."
         Get-ChildItem -Recurse -Include *.exe, *.dll | Where-Object { $_.FullName -notlike "*\bin\*" -and $_.FullName -notlike "*\obj\*" } | ForEach-Object {
             $name = $_.Name
@@ -59,5 +68,5 @@ jobs:
         
     - uses: actions/upload-artifact@v4
       with: 
-        name: Ultimate-Uncut-Artifact
+        name: Ultimate-Uncut-Artifact-${{ github.event.inputs.ce_version }}
         path: Ultimate-Uncut-CheatEngine.zip
