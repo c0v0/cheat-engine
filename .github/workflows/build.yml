@@ -1,0 +1,63 @@
+name: Ultimate Uncut Dual-Architecture Cheat Engine Build
+on: [workflow_dispatch]
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+      with: 
+        submodules: recursive
+        
+    - name: Set up Lazarus (Fixed version)
+      uses: gcarreno/setup-lazarus@v3.2.15
+      with: 
+        lazarus-version: "dist" 
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Build and Package
+      shell: powershell
+      run: |
+        cd "Cheat Engine"
+        $binPath = (Get-Item "bin").FullName
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        
+        # 1. 初版核心：編譯主程式 (鎖定原生完美中文)
+        lazbuild cheatengine.lpi --build-mode="Release 64-bit"
+        
+        # 2. 補全 Pascal 核心相依動態庫
+        $pFiles = Get-ChildItem -Recurse -Filter "*.lpr" | Where-Object {$_.FullName -match "luaclient|speedhack|vehdebug"}
+        foreach ($file in $pFiles) { lazbuild -B --cpu=x86_64 --os=win64 $file.FullName }
+
+        # 3. 全量補全 C++ 核心組件 (包含 .NET Collector, DirectXHook, 框架與 TCC 核心)
+        Get-ChildItem -Recurse -Filter *.sln | Where-Object { $_.FullName -match "DotNetDataCollector|DirectXHook|plugin|MemoryCollector|tcc" } | ForEach-Object {
+            if ($_.Name -match "tcc") {
+                msbuild $_.FullName /p:Configuration="Output to 64 (Release)" /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+                msbuild $_.FullName /p:Configuration="Output to 32 (Release)" /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+            } else {
+                msbuild $_.FullName /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+                msbuild $_.FullName /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+            }
+        }
+        
+        # 4. 【語法 Bug 修正】縮回同一行，以極致安全的邏輯將所有編譯好的 DLL/EXE 歸位至 bin
+        Write-Host "正在進行安全的二進位組件定點集結..."
+        Get-ChildItem -Recurse -Include *.exe, *.dll | Where-Object { $_.FullName -notlike "*\bin\*" -and $_.FullName -notlike "*\obj\*" } | ForEach-Object {
+            $name = $_.Name
+            if ($name -match "DotNet" -or $name -match "cejvmti" -or $name -match "DirectXHook" -or $name -match "tcc") {
+                Copy-Item $_.FullName -Destination "$binPath\" -Force
+            }
+        }
+        
+        # 5. 精準清理編譯快取暫存檔
+        Get-ChildItem -Path "bin" -Include *.obj, *.tlog, *.lastbuildstate, *.recipe, *.pdb, *.iobj, *.ipdb, *.log, *.meta -Recurse | Remove-Item -Force
+        
+        cd ..
+        # 6. 終極完美打包
+        Compress-Archive -Path "Cheat Engine\bin\*" -DestinationPath "Ultimate-Uncut-CheatEngine.zip" -Force
+        
+    - uses: actions/upload-artifact@v4
+      with: 
+        name: Ultimate-Uncut-Artifact
+        path: Ultimate-Uncut-CheatEngine.zip
